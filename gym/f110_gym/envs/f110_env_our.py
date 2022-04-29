@@ -1,21 +1,50 @@
+# MIT License
+
+# Copyright (c) 2020 Joseph Auckley, Matthew O'Kelly, Aman Sinha, Hongrui Zheng
+
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+'''
+Author: Hongrui Zheng
+'''
+
 # gym imports
 import gym
+from gym import error, spaces, utils
+from gym.utils import seeding
 
 # base classes
-from f110_gym.envs.base_classes_modified import Simulator
+from f110_gym.envs.base_classes_our import Simulator
 
 # others
 import numpy as np
 import pandas as pd
 import os
 import time
-import math
+from numpy import sqrt, cos, sin
+
 # gl
 import pyglet
 pyglet.options['debug_gl'] = False
 from pyglet import gl
 
-from numpy import sqrt, sin, cos
+# constants
 
 # rendering
 VIDEO_W = 600
@@ -25,6 +54,10 @@ WINDOW_H = 800
 
 class F110Env(gym.Env):
 	"""
+	OpenAI gym environment for F1TENTH
+	
+	Env should be initialized by calling gym.make('f110_gym:f110-v0', **kwargs)
+
 	Args:
 		kwargs:
 			seed (int, default=12345): seed for random state and reproducibility
@@ -71,13 +104,20 @@ class F110Env(gym.Env):
 		try:
 			self.seed = kwargs['seed']
 		except:
-			self.seed = 2318
+			self.seed = 12345
 		try:
 			self.map_name = kwargs['map']
-			self.map_path = self.map_name + '.yaml'
+			# different default maps
+			if self.map_name == 'berlin':
+				self.map_path = os.path.dirname(os.path.abspath(__file__)) + '/maps/berlin.yaml'
+			elif self.map_name == 'skirk':
+				self.map_path = os.path.dirname(os.path.abspath(__file__)) + '/maps/skirk.yaml'
+			elif self.map_name == 'levine':
+				self.map_path = os.path.dirname(os.path.abspath(__file__)) + '/maps/levine.yaml'
+			else:
+				self.map_path = self.map_name + '.yaml'
 		except:
-			print("No map provided")
-			exit()
+			self.map_path = os.path.dirname(os.path.abspath(__file__)) + '/maps/vegas.yaml'
 
 		try:
 			self.map_ext = kwargs['map_ext']
@@ -90,8 +130,21 @@ class F110Env(gym.Env):
 			self.params = {'mu': 1.0489, 'C_Sf': 4.718, 'C_Sr': 5.4562, 'lf': 0.15875, 'lr': 0.17145, 'h': 0.074, 'm': 3.74, 'I': 0.04712, 's_min': -0.4189, 's_max': 0.4189, 'sv_min': -3.2, 'sv_max': 3.2, 'v_switch': 7.319, 'a_max': 9.51, 'v_min':-5.0, 'v_max': 20.0, 'width': 0.31, 'length': 0.58}
 
 		# simulation parameters
-		self.num_agents = 1
-		self.ego_idx = 0
+		try:
+			self.num_agents = kwargs['num_agents']
+		except:
+			self.num_agents = 2
+
+		try:
+			self.timestep = kwargs['timestep']
+		except:
+			self.timestep = 0.01
+
+		# default ego index
+		try:
+			self.ego_idx = kwargs['ego_idx']
+		except:
+			self.ego_idx = 0
 
 		# radius to consider done
 		self.start_thresh = 0.5  # 10cm
@@ -99,9 +152,13 @@ class F110Env(gym.Env):
 		# variable to store the reference trajectory
 		self.route = None
 
-		# ego_racecar location
+		# env states
 		self.poses_x = []
 		self.poses_y = []
+		self.poses_theta = []
+		self.collisions = np.zeros((self.num_agents, ))
+		# TODO: collision_idx not used yet
+		# self.collision_idx = -1 * np.ones((self.num_agents, ))
 
 		# States to find the errors
 		self.time = time.time()
@@ -110,8 +167,6 @@ class F110Env(gym.Env):
 		self.prev_e_slip = 0.0
 		self.prev_e_vx = 0.0
 		self.prev_e_vy = 0.0
-
-		self.collisions = np.zeros((self.num_agents, ))
 
 		# loop completion
 		self.near_start = True
@@ -141,9 +196,16 @@ class F110Env(gym.Env):
 
 		self.parse_csv()
 
+	def __del__(self):
+		"""
+		Finalizer, does cleanup
+		"""
+		pass
+
 	def _check_done(self):
 		"""
 		Check if the current rollout is done
+		
 		Args:
 			None
 
@@ -153,6 +215,7 @@ class F110Env(gym.Env):
 		"""
 
 		# this is assuming 2 agents
+		# TODO: switch to maybe s-based
 		left_t = 2
 		right_t = 2
 		
@@ -195,6 +258,7 @@ class F110Env(gym.Env):
 		"""
 		self.poses_x = obs_dict['poses_x']
 		self.poses_y = obs_dict['poses_y']
+		self.poses_theta = obs_dict['poses_theta']
 		self.collisions = obs_dict['collisions']
 
 	def step(self, action):
@@ -227,9 +291,11 @@ class F110Env(gym.Env):
 			'lap_counts': obs['lap_counts']
 			}
 
-
+		# times
 		state_drift = self.get_drift_state(obs, action)
 		reward = self.get_reward(obs, state_drift)
+		# reward = self.current_time
+		self.current_time = self.current_time + self.timestep
 		
 		# update data member
 		self._update_state(obs)
@@ -239,6 +305,7 @@ class F110Env(gym.Env):
 		info = {'checkpoint_done': toggle_list}
 
 		return obs, reward, done, info
+
 
 	def get_drift_state(self, obs, action):
 		"""
@@ -308,7 +375,7 @@ class F110Env(gym.Env):
 		elif(closest_idx+1 < len(self.route) and closest_idx+11 > len(self.route)):
 			start = closest_idx+1
 			end = (closest_idx+11) % len(self.route)			
-			points = (self.route[start:][:3]).reshape(-1)
+			points = (self.route[start:][:,:3]).reshape(-1)
 			points = np.append(points, (self.route[:end][:,:3]).reshape(-1))
 			state_drift[12:] = points
 		else: # both are out of range
@@ -342,7 +409,7 @@ class F110Env(gym.Env):
 
 		vx = obs['linear_vels_x'][0]
 		vy = obs['linear_vels_y'][0]
-		v = math.sqrt(vx*vx + vy*vy)
+		v = sqrt(vx*vx + vy*vy)
 
 		reward = v*(40*r_dis + 40*r_heading + 20*r_slip)
 
@@ -371,7 +438,7 @@ class F110Env(gym.Env):
 			info (dict): auxillary information dictionary
 		"""
 		# reset counters and data members
-		self.time = time.time()
+		self.current_time = 0.0
 		self.collisions = np.zeros((self.num_agents, ))
 		self.num_toggles = 0
 		self.near_start = True
@@ -382,15 +449,6 @@ class F110Env(gym.Env):
 		self.start_xs = poses[:, 0]
 		self.start_ys = poses[:, 1]
 		self.start_thetas = poses[:, 2]
-
-		self.prev_e_y = 0.0
-		self.prev_e_heading = 0.0
-		self.prev_e_slip = 0.0
-		self.prev_e_vx = 0.0
-		self.prev_e_vy = 0.0
-
-
-		# Car frame to world frame
 		self.start_rot = np.array([[np.cos(-self.start_thetas[self.ego_idx]), -np.sin(-self.start_thetas[self.ego_idx])], [np.sin(-self.start_thetas[self.ego_idx]), np.cos(-self.start_thetas[self.ego_idx])]])
 
 		# call reset to simulator
@@ -480,12 +538,10 @@ class F110Env(gym.Env):
 		elif mode == 'human_fast':
 			pass
 
-
 	def parse_csv(self):
 		'''
 			Updates the global variable self.route with reference trajectory
 			self.route (np.array (n,5)): x, y, heading, velocity, beta (slip angle)
 		'''
-		traj = pd.read_csv('../drift_drl/checkpoints/waypoints_beta.csv')
+		traj = pd.read_csv('waypoints_beta.csv')
 		self.route = traj.values
-
