@@ -2,18 +2,20 @@
 import gym
 
 # base classes
-from f110_gym.envs.base_classes import Simulator
+from f110_gym.envs.base_classes_modified import Simulator
 
 # others
 import numpy as np
 import pandas as pd
 import os
 import time
-
+import math
 # gl
 import pyglet
 pyglet.options['debug_gl'] = False
 from pyglet import gl
+
+from numpy import sqrt, sin, cos
 
 # rendering
 VIDEO_W = 600
@@ -270,8 +272,10 @@ class F110Env(gym.Env):
 
 		# TODO (Rocket): Calc e_heading and e_d_heading
 		# e_heading 
+		e_heading = 0
+		e_d_heading = 0
 
-		e_slip = beta - obs['slip_angle']
+		e_slip = beta - obs['slip_angles']
 		e_d_slip = (e_slip - self.prev_e_slip) / dt
 		self.prev_e_slip = e_slip
 
@@ -300,15 +304,15 @@ class F110Env(gym.Env):
 		if(closest_idx+1 < len(self.route) and closest_idx+11 < len(self.route)): # both are inside the range
 			start = closest_idx+1
 			end = closest_idx+11
-			state_drift[12:] = (self.route[start:end][:3]).reshape(-1) # x, y, theta of next 10 points
+			state_drift[12:] = (self.route[start:end][:,:3]).reshape(-1) # x, y, theta of next 10 points
 		elif(closest_idx+1 < len(self.route) and closest_idx+11 > len(self.route)):
 			start = closest_idx+1
 			end = (closest_idx+11) % len(self.route)			
 			points = (self.route[start:][:3]).reshape(-1)
-			points = np.append(points, (self.route[:end][:3]).reshape(-1))
+			points = np.append(points, (self.route[:end][:,:3]).reshape(-1))
 			state_drift[12:] = points
 		else: # both are out of range
-			state_drift[12:] = (self.route[0:10][:3]).reshape(-1) # x, y, theta of next 10 points
+			state_drift[12:] = (self.route[0:10][:,:3]).reshape(-1) # x, y, theta of next 10 points
 
 		
 		self.time = time.time()
@@ -336,8 +340,8 @@ class F110Env(gym.Env):
 		else:
 			r_slip = -np.exp(-0.1*(e_slip+180))
 
-		vx = obs['linear_vels_x']
-		vy = obs['linear_vels_y']
+		vx = obs['linear_vels_x'][0]
+		vy = obs['linear_vels_y'][0]
 		v = math.sqrt(vx*vx + vy*vy)
 
 		reward = v*(40*r_dis + 40*r_heading + 20*r_slip)
