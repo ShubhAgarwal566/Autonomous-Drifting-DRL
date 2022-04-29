@@ -1,0 +1,487 @@
+# gym imports
+import gym
+
+# base classes
+from f110_gym.envs.base_classes import Simulator
+
+# others
+import numpy as np
+import pandas as pd
+import os
+import time
+
+# gl
+import pyglet
+pyglet.options['debug_gl'] = False
+from pyglet import gl
+
+# rendering
+VIDEO_W = 600
+VIDEO_H = 400
+WINDOW_W = 1000
+WINDOW_H = 800
+
+class F110Env(gym.Env):
+	"""
+	Args:
+		kwargs:
+			seed (int, default=12345): seed for random state and reproducibility
+			
+			map (str, default='vegas'): name of the map used for the environment. Currently, available environments include: 'berlin', 'vegas', 'skirk'. You could use a string of the absolute path to the yaml file of your custom map.
+		
+			map_ext (str, default='png'): image extension of the map image file. For example 'png', 'pgm'
+		
+			params (dict, default={'mu': 1.0489, 'C_Sf':, 'C_Sr':, 'lf': 0.15875, 'lr': 0.17145, 'h': 0.074, 'm': 3.74, 'I': 0.04712, 's_min': -0.4189, 's_max': 0.4189, 'sv_min': -3.2, 'sv_max': 3.2, 'v_switch':7.319, 'a_max': 9.51, 'v_min':-5.0, 'v_max': 20.0, 'width': 0.31, 'length': 0.58}): dictionary of vehicle parameters.
+			mu: surface friction coefficient
+			C_Sf: Cornering stiffness coefficient, front
+			C_Sr: Cornering stiffness coefficient, rear
+			lf: Distance from center of gravity to front axle
+			lr: Distance from center of gravity to rear axle
+			h: Height of center of gravity
+			m: Total mass of the vehicle
+			I: Moment of inertial of the entire vehicle about the z axis
+			s_min: Minimum steering angle constraint
+			s_max: Maximum steering angle constraint
+			sv_min: Minimum steering velocity constraint
+			sv_max: Maximum steering velocity constraint
+			v_switch: Switching velocity (velocity at which the acceleration is no longer able to create wheel spin)
+			a_max: Maximum longitudinal acceleration
+			v_min: Minimum longitudinal velocity
+			v_max: Maximum longitudinal velocity
+			width: width of the vehicle in meters
+			length: length of the vehicle in meters
+
+			num_agents (int, default=2): number of agents in the environment
+
+			timestep (float, default=0.01): physics timestep
+
+			ego_idx (int, default=0): ego's index in list of agents
+	"""
+	metadata = {'render.modes': ['human', 'human_fast']}
+
+	# rendering
+	renderer = None
+	current_obs = None
+	render_callbacks = []
+
+	def __init__(self, **kwargs):        
+		# kwargs extraction
+		try:
+			self.seed = kwargs['seed']
+		except:
+			self.seed = 2318
+		try:
+			self.map_name = kwargs['map']
+			self.map_path = self.map_name + '.yaml'
+		except:
+			print("No map provided")
+			exit()
+
+		try:
+			self.map_ext = kwargs['map_ext']
+		except:
+			self.map_ext = '.png'
+
+		try:
+			self.params = kwargs['params']
+		except:
+			self.params = {'mu': 1.0489, 'C_Sf': 4.718, 'C_Sr': 5.4562, 'lf': 0.15875, 'lr': 0.17145, 'h': 0.074, 'm': 3.74, 'I': 0.04712, 's_min': -0.4189, 's_max': 0.4189, 'sv_min': -3.2, 'sv_max': 3.2, 'v_switch': 7.319, 'a_max': 9.51, 'v_min':-5.0, 'v_max': 20.0, 'width': 0.31, 'length': 0.58}
+
+		# simulation parameters
+		self.num_agents = 1
+		self.ego_idx = 0
+
+		# radius to consider done
+		self.start_thresh = 0.5  # 10cm
+
+		# variable to store the reference trajectory
+		self.route = None
+
+		# ego_racecar location
+		self.poses_x = []
+		self.poses_y = []
+
+		# States to find the errors
+		self.time = time.time()
+		self.prev_e_y = 0.0
+		self.prev_e_heading = 0.0
+		self.prev_e_slip = 0.0
+		self.prev_e_vx = 0.0
+		self.prev_e_vy = 0.0
+
+		self.collisions = np.zeros((self.num_agents, ))
+
+		# loop completion
+		self.near_start = True
+		self.num_toggles = 0
+
+		# race info
+		self.lap_times = np.zeros((self.num_agents, ))
+		self.lap_counts = np.zeros((self.num_agents, ))
+		self.current_time = 0.0
+
+		# finish line info
+		self.num_toggles = 0
+		self.near_start = True
+		self.near_starts = np.array([True]*self.num_agents)
+		self.toggle_list = np.zeros((self.num_agents,))
+		self.start_xs = np.zeros((self.num_agents, ))
+		self.start_ys = np.zeros((self.num_agents, ))
+		self.start_thetas = np.zeros((self.num_agents, ))
+		self.start_rot = np.eye(2)
+
+		# initiate stuff
+		self.sim = Simulator(self.params, self.num_agents, self.seed)
+		self.sim.set_map(self.map_path, self.map_ext)
+
+		# stateful observations for rendering
+		self.render_obs = None
+
+		self.parse_csv()
+
+	def _check_done(self):
+		"""
+		Check if the current rollout is done
+		Args:
+			None
+
+		Returns:
+			done (bool): whether the rollout is done
+			toggle_list (list[int]): each agent's toggle list for crossing the finish zone
+		"""
+
+		# this is assuming 2 agents
+		left_t = 2
+		right_t = 2
+		
+		poses_x = np.array(self.poses_x)-self.start_xs
+		poses_y = np.array(self.poses_y)-self.start_ys
+		delta_pt = np.dot(self.start_rot, np.stack((poses_x, poses_y), axis=0))
+		temp_y = delta_pt[1,:]
+		idx1 = temp_y > left_t
+		idx2 = temp_y < -right_t
+		temp_y[idx1] -= left_t
+		temp_y[idx2] = -right_t - temp_y[idx2]
+		temp_y[np.invert(np.logical_or(idx1, idx2))] = 0
+
+		dist2 = delta_pt[0, :]**2 + temp_y**2
+		closes = dist2 <= 0.1
+		for i in range(self.num_agents):
+			if closes[i] and not self.near_starts[i]:
+				self.near_starts[i] = True
+				self.toggle_list[i] += 1
+			elif not closes[i] and self.near_starts[i]:
+				self.near_starts[i] = False
+				self.toggle_list[i] += 1
+			self.lap_counts[i] = self.toggle_list[i] // 2
+			if self.toggle_list[i] < 4:
+				self.lap_times[i] = self.current_time
+		
+		done = (self.collisions[self.ego_idx]) or np.all(self.toggle_list >= 4)
+		
+		return done, self.toggle_list >= 4
+
+	def _update_state(self, obs_dict):
+		"""
+		Update the env's states according to observations
+		
+		Args:
+			obs_dict (dict): dictionary of observation
+
+		Returns:
+			None
+		"""
+		self.poses_x = obs_dict['poses_x']
+		self.poses_y = obs_dict['poses_y']
+		self.collisions = obs_dict['collisions']
+
+	def step(self, action):
+		"""
+		Step function for the gym env
+
+		Args:
+			action (np.ndarray(num_agents, 2))
+
+		Returns:
+			obs (dict): observation of the current step
+			reward (float, default=self.timestep): step reward, currently is physics timestep
+			done (bool): if the simulation is done
+			info (dict): auxillary information dictionary
+		"""
+		
+		# call simulation step
+		obs = self.sim.step(action)
+		obs['lap_times'] = self.lap_times
+		obs['lap_counts'] = self.lap_counts
+
+		F110Env.current_obs = obs
+
+		self.render_obs = {
+			'ego_idx': obs['ego_idx'],
+			'poses_x': obs['poses_x'],
+			'poses_y': obs['poses_y'],
+			'poses_theta': obs['poses_theta'],
+			'lap_times': obs['lap_times'],
+			'lap_counts': obs['lap_counts']
+			}
+
+
+		state_drift = self.get_drift_state(obs, action)
+		reward = self.get_reward(obs, state_drift)
+		
+		# update data member
+		self._update_state(obs)
+
+		# check done
+		done, toggle_list = self._check_done()
+		info = {'checkpoint_done': toggle_list}
+
+		return obs, reward, done, info
+
+	def get_drift_state(self, obs, action):
+		"""
+		Returns the state variables relevant for the drifting problem  
+
+		Args:
+			obs (np.ndarray (9,1)): observations from the env 
+									{ego_idx, scan, poses_x, poses_y, poses_theta, linear_vels_x, linear_vels_y, slip_angle, ang_vels_z, collisions}
+			action (np.ndarray (num_agents,2)): steering and throttle for all agents
+
+		Returns:
+			state_drift (np.array): 42 state variables.
+		"""
+
+		dt = time.time() - self.time
+		state_drift = np.zeros(42,)
+		current_x = obs['poses_x']
+		current_y = obs['poses_y']
+		closest_idx = self.get_closest(current_x, current_y)
+		ref_point  = self.route[closest_idx].reshape(-1)
+		beta = ref_point[4]
+
+		# self.route (np.array (n,5)): x, y, heading, velocity, beta (slip angle)
+		if (len(ref_point) != 5):
+			raise Exception("Atleast one point in reference trajectories doesn't have 5 values")
+		
+		# TODO (Rocket): The paper uses abs. According to us it should be signed for better performance
+		e_y = abs(ref_point[1] - current_y)
+		e_d_y = (self.prev_e_y-e_y) / dt
+		self.prev_e_y = e_y
+
+		# TODO (Rocket): Calc e_heading and e_d_heading
+		# e_heading 
+
+		e_slip = beta - obs['slip_angle']
+		e_d_slip = (e_slip - self.prev_e_slip) / dt
+		self.prev_e_slip = e_slip
+
+
+		e_vx = ref_point[3]*cos(beta) - obs['linear_vels_x']
+		e_d_vx = (e_vx - self.prev_e_vx) / dt
+		self.prev_e_vx = e_vx
+
+		e_vy = ref_point[3]*sin(beta) - obs['linear_vels_y']
+		e_d_vy = (e_vy - self.prev_e_vy) / dt
+		self.prev_e_vy = e_vy
+
+
+		state_drift[:2] = action.reshape(-1) 
+		state_drift[2] = e_y 
+		state_drift[3] = e_d_y 
+		state_drift[4] = e_heading 
+		state_drift[5] = e_d_heading
+		state_drift[6] = e_slip 
+		state_drift[7] = e_d_slip 
+		state_drift[8] = e_vx 
+		state_drift[9] = e_d_vx
+		state_drift[10] = e_vy 
+		state_drift[11] = e_d_vy
+		
+		if(closest_idx+1 < len(self.route) and closest_idx+11 < len(self.route)): # both are inside the range
+			start = closest_idx+1
+			end = closest_idx+11
+			state_drift[12:] = (self.route[start:end][:3]).reshape(-1) # x, y, theta of next 10 points
+		elif(closest_idx+1 < len(self.route) and closest_idx+11 > len(self.route)):
+			start = closest_idx+1
+			end = (closest_idx+11) % len(self.route)			
+			points = (self.route[start:][:3]).reshape(-1)
+			points = np.append(points, (self.route[:end][:3]).reshape(-1))
+			state_drift[12:] = points
+		else: # both are out of range
+			state_drift[12:] = (self.route[0:10][:3]).reshape(-1) # x, y, theta of next 10 points
+
+		
+		self.time = time.time()
+		return state_drift
+
+
+	def get_reward(self, obs, state_drift):
+		e_dis = state_drift[2]
+		e_slip = state_drift[6]
+		e_heading = state_drift[4]
+
+		r_dis = np.exp(-0.5*e_dis)
+
+		if abs(e_heading)<90:
+			r_heading = np.exp(-0.1*abs(e_heading))
+		elif (e_heading)>= 90:
+			r_heading = -np.exp(-0.1*(180-e_heading))
+		else:
+			r_heading = -np.exp(-0.1*(e_heading+180))
+
+		if abs(e_slip)<90:
+			r_slip = np.exp(-0.1*abs(e_slip))
+		elif (e_slip)>= 90:
+			r_slip = -np.exp(-0.1*(180-e_slip))
+		else:
+			r_slip = -np.exp(-0.1*(e_slip+180))
+
+		vx = obs['linear_vels_x']
+		vy = obs['linear_vels_y']
+		v = math.sqrt(vx*vx + vy*vy)
+
+		reward = v*(40*r_dis + 40*r_heading + 20*r_slip)
+
+		# TODO (Rocket): The threshold for vel scaling might change for us
+		if v < 6:
+			reward  = reward / 2
+
+		return reward
+
+	def get_closest(self, current_x, current_y):
+		dists = sqrt( (self.route[:,0]-current_x)**2 + (self.route[:,1]-current_y)**2 ) # distance to all points
+		closest_idx	= np.argmin(dists.reshape(-1)) # idx of point with least distance
+		return closest_idx
+
+	def reset(self, poses):
+		"""
+		Reset the gym environment by given poses
+
+		Args:
+			poses (np.ndarray (num_agents, 3)): poses to reset agents to
+
+		Returns:
+			obs (dict): observation of the current step
+			reward (float, default=self.timestep): step reward, currently is physics timestep
+			done (bool): if the simulation is done
+			info (dict): auxillary information dictionary
+		"""
+		# reset counters and data members
+		self.time = time.time()
+		self.collisions = np.zeros((self.num_agents, ))
+		self.num_toggles = 0
+		self.near_start = True
+		self.near_starts = np.array([True]*self.num_agents)
+		self.toggle_list = np.zeros((self.num_agents,))
+
+		# states after reset
+		self.start_xs = poses[:, 0]
+		self.start_ys = poses[:, 1]
+		self.start_thetas = poses[:, 2]
+
+		self.prev_e_y = 0.0
+		self.prev_e_heading = 0.0
+		self.prev_e_slip = 0.0
+		self.prev_e_vx = 0.0
+		self.prev_e_vy = 0.0
+
+
+		# Car frame to world frame
+		self.start_rot = np.array([[np.cos(-self.start_thetas[self.ego_idx]), -np.sin(-self.start_thetas[self.ego_idx])], [np.sin(-self.start_thetas[self.ego_idx]), np.cos(-self.start_thetas[self.ego_idx])]])
+
+		# call reset to simulator
+		self.sim.reset(poses)
+
+		# get no input observations
+		action = np.zeros((self.num_agents, 2))
+		obs, reward, done, info = self.step(action)
+
+		self.render_obs = {
+			'ego_idx': obs['ego_idx'],
+			'poses_x': obs['poses_x'],
+			'poses_y': obs['poses_y'],
+			'poses_theta': obs['poses_theta'],
+			'lap_times': obs['lap_times'],
+			'lap_counts': obs['lap_counts']
+			}
+		
+		return obs, reward, done, info
+
+	def update_map(self, map_path, map_ext):
+		"""
+		Updates the map used by simulation
+
+		Args:
+			map_path (str): absolute path to the map yaml file
+			map_ext (str): extension of the map image file
+
+		Returns:
+			None
+		"""
+		self.sim.set_map(map_path, map_ext)
+
+	def update_params(self, params, index=-1):
+		"""
+		Updates the parameters used by simulation for vehicles
+		
+		Args:
+			params (dict): dictionary of parameters
+			index (int, default=-1): if >= 0 then only update a specific agent's params
+
+		Returns:
+			None
+		"""
+		self.sim.update_params(params, agent_idx=index)
+
+	def add_render_callback(self, callback_func):
+		"""
+		Add extra drawing function to call during rendering.
+
+		Args:
+			callback_func (function (EnvRenderer) -> None): custom function to called during render()
+		"""
+
+		F110Env.render_callbacks.append(callback_func)
+
+	def render(self, mode='human'):
+		"""
+		Renders the environment with pyglet. Use mouse scroll in the window to zoom in/out, use mouse click drag to pan. Shows the agents, the map, current fps (bottom left corner), and the race information near as text.
+
+		Args:
+			mode (str, default='human'): rendering mode, currently supports:
+				'human': slowed down rendering such that the env is rendered in a way that sim time elapsed is close to real time elapsed
+				'human_fast': render as fast as possible
+
+		Returns:
+			None
+		"""
+		assert mode in ['human', 'human_fast']
+		
+		if F110Env.renderer is None:
+			# first call, initialize everything
+			from f110_gym.envs.rendering import EnvRenderer
+			F110Env.renderer = EnvRenderer(WINDOW_W, WINDOW_H)
+			F110Env.renderer.update_map(self.map_name, self.map_ext)
+			
+		F110Env.renderer.update_obs(self.render_obs)
+
+		for render_callback in F110Env.render_callbacks:
+			render_callback(F110Env.renderer)
+		
+		F110Env.renderer.dispatch_events()
+		F110Env.renderer.on_draw()
+		F110Env.renderer.flip()
+		if mode == 'human':
+			time.sleep(0.005)
+		elif mode == 'human_fast':
+			pass
+
+
+	def parse_csv(self):
+		'''
+			Updates the global variable self.route with reference trajectory
+			self.route (np.array (n,5)): x, y, heading, velocity, beta (slip angle)
+		'''
+		traj = pd.read_csv('../drift_drl/checkpoints/waypoints_beta.csv')
+		self.route = traj.values
+

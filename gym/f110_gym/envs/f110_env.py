@@ -34,7 +34,6 @@ from f110_gym.envs.base_classes import Simulator
 
 # others
 import numpy as np
-import pandas as pd
 import os
 import time
 
@@ -151,14 +150,8 @@ class F110Env(gym.Env):
         self.poses_x = []
         self.poses_y = []
         self.poses_theta = []
-        # self.vels_x = []
-        # self.vels_y = []
-        # self.betas = []
-
-        # States to find the rate of change
-
-
-
+        self.vels_x = []
+        self.vels_y = []
         self.collisions = np.zeros((self.num_agents, ))
         # TODO: collision_idx not used yet
         # self.collision_idx = -1 * np.ones((self.num_agents, ))
@@ -198,9 +191,7 @@ class F110Env(gym.Env):
     def _check_done(self):
         """
         Check if the current rollout is done
-                # self.vels_x = []
-        # self.vels_y = []
-        # self.betas = []
+        
         Args:
             None
 
@@ -254,11 +245,9 @@ class F110Env(gym.Env):
         self.poses_x = obs_dict['poses_x']
         self.poses_y = obs_dict['poses_y']
         self.poses_theta = obs_dict['poses_theta']
-        # self.vels_x = obs_dict['linear_vels_x']
-        # self.vels_y = obs_dict['linear_vels_y']
-        # self.betas = obs_dict['slip_angles']
-
         self.collisions = obs_dict['collisions']
+        self.vels_x = obs_dict['linear_vels_x']
+        self.vels_y = obs_dict['linear_vels_y']
 
     def step(self, action):
         """
@@ -417,20 +406,3 @@ class F110Env(gym.Env):
             time.sleep(0.005)
         elif mode == 'human_fast':
             pass
-
-
-    def refreshRoute(self):
-        traj = pd.read_csv('../drift_drl/checkpoints/waypoints_beta.csv')
-
-        self.route = traj.values
-        self.route_x = self.route[:,0]
-        self.route_y = self.route[:,1]
-        self.route_heading = self.route[:,2]
-        self.route_vel = self.route[:,3]
-        self.route_beta = self.route[:,4]
-        self.route_length = np.zeros(self.route.shape[0])
-
-        for i in range(1, self.route.shape[0]):
-            dx = self.route_x[i-1] - self.route_x[i]
-            dy = self.route_y[i-1] - self.route_y[i]
-            self.route_length[i] = self.route_length[i-1] + np.sqrt(dx * dx + dy * dy)
