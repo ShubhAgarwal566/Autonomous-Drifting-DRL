@@ -14,6 +14,7 @@ if __name__ == "__main__":
 	parser.add_argument('--tau',  default=0.005, type=float) # target smoothing coefficient
 	parser.add_argument('--target_update_interval', default=1, type=int)
 	parser.add_argument('--gradient_steps', default=1, type=int)
+	parser.add_argument('--vel_max', default=6.0, type=int)
 
 	parser.add_argument('--learning_rate', default=3e-4, type=int)
 	parser.add_argument('--gamma', default=0.99, type=int) # discount gamma
@@ -40,7 +41,7 @@ if __name__ == "__main__":
 	#tlad is lookahead distance
 
 	work = {'mass': 3.463388126201571, 'lf': 0.15597534362552312, 'tlad': 0.82461887897713965, 'vgain': 0.90338203837889}
-	work['tlad'] =  3
+	work['tlad'] =  3.0
 	# work['vgain'] = 0.25
 	with open('config_example_map.yaml') as file:
 		conf_dict = yaml.load(file, Loader=yaml.FullLoader)
@@ -108,7 +109,7 @@ if __name__ == "__main__":
 
 			#give little throttle at start
 			if f110_startFlag==False:
-				env.step(np.array([[0,0.5]]))
+				env.step(np.array([[0,0.5*args.vel_max]]))
 				f110_startFlag = True
 				continue
 
@@ -116,7 +117,7 @@ if __name__ == "__main__":
 				# env.world.collision_sensor.history = []
 
 			#except n*10th until 3000 
-			if i % 10 != 0 or agent.replay_buffer.num_transition <= 3000:
+			if i % 5 != 0 or agent.replay_buffer.num_transition <= 3000:
 				#reduce the refresh rate of the control loop
 				if time.time()-t0 > 0.5:
 					if not first_step_pass:
@@ -137,13 +138,12 @@ if __name__ == "__main__":
 							agent.writer.add_scalar('Control/iteration_'+str(i)+'/throttle', throttle, global_step = count) 
 
 					# TODO: change this f110
-					next_state, reward, destinationFlag, _= env.step(np.array([[steer, throttle]]))
+					next_state, reward, destinationFlag, _= env.step(np.array([[steer, throttle*args.vel_max]]))
 					
 					# next_state, reward, collisionFlag, destinationFlag, awayFlag, control = env.step(steer, throttle)
 					next_state = np.reshape(next_state, [1, state_dim])
 					
 					ep_r += reward
-					endFlag = destinationFlag
 					
 					if first_step_pass: 
 						
@@ -151,7 +151,7 @@ if __name__ == "__main__":
 						action[0,1] = (action[0,1] - agent.throttle_range[0]) / (agent.throttle_range[1] - agent.throttle_range[0]) * 2 - 1
 
 						# TODO: look for changes for f110
-						agent.replay_buffer.push(tState, action, reward, next_state, endFlag)
+						agent.replay_buffer.push(tState, action, reward, next_state, destinationFlag)
 					
 					tState = next_state
 					
@@ -164,7 +164,7 @@ if __name__ == "__main__":
 					# heading error angle, check notes on tablet. Use variable e_psi
 					hae += abs(tState[0,4])
 
-					if endFlag:
+					if destinationFlag:
 						break
 					
 					print('buffer_size: %d'%agent.replay_buffer.num_transition)
@@ -191,22 +191,19 @@ if __name__ == "__main__":
 							agent.writer.add_scalar('TEST/Control/iteration_'+str(i)+'/steer', steer, global_step = count)
 							agent.writer.add_scalar('TEST/Control/iteration_'+str(i)+'/throttle', throttle, global_step = count)    
 
-					next_state, reward, collisionFlag, destinationFlag, awayFlag, control = env.step(steer, throttle)
+					next_state, reward, destinationFlag, _ = env.step(np.array([[steer, throttle*args.vel_max]]))
 					next_state = np.reshape(next_state, [1, state_dim])
 					ep_r += reward
-					endFlag = collisionFlag or destinationFlag or awayFlag
 					
 					tState = next_state
-					
-					endFlag = collisionFlag or destinationFlag or awayFlag
-					
-					vx = env.velocity_local[0]
-					vy = env.velocity_local[1]
+									
+					vx = env.vel_x
+					vy = env.vel_y
 					speed += np.sqrt(vx*vx + vy*vy)
 					cte += tState[0,2]
 					hae += abs(tState[0,4])
 
-					if endFlag:
+					if destinationFlag:
 						break
 
 					first_step_pass = True 
@@ -216,7 +213,7 @@ if __name__ == "__main__":
 		#starts with ignoring bad data and then gradually increase the number of training cycles        
 		if i % 10 != 0 or agent.replay_buffer.num_transition <= 3000:
 			print("*************TRAIN**************")
-			if agent.replay_buffer.num_transition >= 50 and agent.replay_buffer.num_transition<10000:
+			if agent.replay_buffer.num_transition >= 1000 and agent.replay_buffer.num_transition<10000:
 				for u in range(5):
 					agent.update()
 			if agent.replay_buffer.num_transition >= 10000 and agent.replay_buffer.num_transition<40000:

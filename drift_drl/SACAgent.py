@@ -231,52 +231,54 @@ class SACAgent():
             excepted_Q2 = self.Q_net2(bn_s, bn_a)
             sample_action, log_prob, z, batch_mu, batch_log_sigma = self.evaluate(bn_s)
             excepted_new_Q = torch.min(self.Q_net1(bn_s, sample_action), self.Q_net2(bn_s, sample_action))
-            next_value = excepted_new_Q - log_prob
             
-            V_loss = self.value_criterion(excepted_value, next_value.detach()).mean()  # J_V
 
-            # Dual Q net
-            Q1_loss = self.Q1_criterion(excepted_Q1, next_q_value.detach()).mean() # J_Q
-            Q2_loss = self.Q2_criterion(excepted_Q2, next_q_value.detach()).mean()
 
             pi_loss = (log_prob - excepted_new_Q).mean() # according to original paper
 
-            self.writer.add_scalar('Loss/V_loss', V_loss, global_step=self.num_training)
-            self.writer.add_scalar('Loss/Q1_loss', Q1_loss, global_step=self.num_training)
-            self.writer.add_scalar('Loss/Q2_loss', Q2_loss, global_step=self.num_training)
-            self.writer.add_scalar('Loss/policy_loss', pi_loss, global_step=self.num_training)
 
             # mini batch gradient descent
-            print("Updating value net")
+            # print("Updating value net")
             self.value_optimizer.zero_grad()
+            next_value = excepted_new_Q - log_prob
+            V_loss = self.value_criterion(excepted_value, next_value.detach()).mean()  # J_V
             V_loss.backward(retain_graph=True)
             nn.utils.clip_grad_norm_(self.value_net.parameters(), 0.5)
             self.value_optimizer.step()
 
-            print("Updating Q1 net")
-            self.Q1_optimizer.zero_grad()
-            Q1_loss.backward(retain_graph = True)
-            nn.utils.clip_grad_norm_(self.Q_net1.parameters(), 0.5)
-            self.Q1_optimizer.step()
-
-            print("Updating Q2 net")
-            self.Q2_optimizer.zero_grad()
-            Q2_loss.backward(retain_graph = True)
-            nn.utils.clip_grad_norm_(self.Q_net2.parameters(), 0.5)
-            self.Q2_optimizer.step()
-
-            print("Updating policy net")
             self.policy_optimizer.zero_grad()
             pi_loss.backward(retain_graph = True)
             nn.utils.clip_grad_norm_(self.policy_net.parameters(), 0.5)
             self.policy_optimizer.step()
 
+
+            self.Q1_optimizer.zero_grad()
+            self.Q2_optimizer.zero_grad()
+
+            # Dual Q net
+            Q1_loss = self.Q1_criterion(excepted_Q1, next_q_value.detach()).mean() # J_Q
+            Q2_loss = self.Q2_criterion(excepted_Q2, next_q_value.detach()).mean()
+
+            critic_loss = Q1_loss + Q2_loss
+            critic_loss.backward(retain_graph = True)
+            nn.utils.clip_grad_norm_(self.Q_net1.parameters(), 0.5)
+            nn.utils.clip_grad_norm_(self.Q_net2.parameters(), 0.5)
+            self.Q1_optimizer.step()
+            self.Q2_optimizer.step()
+
+            # Q2_loss.backward(retain_graph = True)
+
             # update target v net update
-            print("Updating target net")
             for target_param, param in zip(self.Target_value_net.parameters(), self.value_net.parameters()):
                 target_param.data.copy_(target_param * (1 - args.tau) + param * args.tau)
 
+            self.writer.add_scalar('Loss/V_loss', V_loss, global_step=self.num_training)
+            self.writer.add_scalar('Loss/Q1_loss', Q1_loss, global_step=self.num_training)
+            self.writer.add_scalar('Loss/Q2_loss', Q2_loss, global_step=self.num_training)
+            self.writer.add_scalar('Loss/policy_loss', pi_loss, global_step=self.num_training)
+            
             self.num_training += 1
+
 
     def save(self,epoch, capacity):
         os.makedirs('./SAC_model_' +str(capacity) , exist_ok=True)
