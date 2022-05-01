@@ -249,7 +249,7 @@ def main():
 
 
     #init params
-    params_dict = {'mu': 0.1, #1.0489,
+    params_dict = {'mu': 0.5, #1.0489,
                     'C_Sf': 4.718,
                     'C_Sr': 5.4562,
                     'lf': 0.15875,

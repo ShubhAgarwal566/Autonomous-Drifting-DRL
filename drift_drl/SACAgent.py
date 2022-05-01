@@ -14,8 +14,9 @@ from tqdm import tqdm
 
 #CPU or GPU
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
+print(device)
 #device = 'cpu'
-
+torch.autograd.set_detect_anomaly(True)
 
 parser = argparse.ArgumentParser()
 
@@ -83,13 +84,13 @@ class Actor(nn.Module):
         self.max_log_std = max_log_std
 
     def forward(self, x):
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
+        x = F.relu(self.fc1(x), inplace=False)
+        x = F.relu(self.fc2(x), inplace=False)
         mu = self.mu_head(x)
         log_std_head = self.log_std_head(x)
         #clamp same as clip
-        log_std_head = torch.clamp(log_std_head, self.min_log_std, self.max_log_std) ##give a resitriction on the chosen action
-        return mu, log_std_head
+        log_std = torch.clamp(log_std_head, self.min_log_std, self.max_log_std) ##give a resitriction on the chosen action
+        return mu, log_std
 
     #TODO change names ulta pulta
 class Critic(nn.Module): #Q inputs: s
@@ -101,8 +102,8 @@ class Critic(nn.Module): #Q inputs: s
 
     def forward(self, x):
         
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
+        x = F.relu(self.fc1(x), inplace=False)
+        x = F.relu(self.fc2(x), inplace=False)
         x = self.fc3(x)
         return x
 
@@ -118,9 +119,7 @@ class Q(nn.Module): #critic inputs: s,a
         self.fc3 = nn.Linear(256, 1)
 
     def forward(self, s, a):
-        s = s.reshape(-1, self.state_dim)
-        a = a.reshape(-1, self.action_dim)
-        x = torch.cat((s, a), -1) # combination s and a
+        x = torch.cat((s.reshape(-1, self.state_dim), a.reshape(-1, self.action_dim)), -1) # combination s and a
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
         x = self.fc3(x)
@@ -129,7 +128,7 @@ class Q(nn.Module): #critic inputs: s,a
 
 class SACAgent():
     #TODO change this according to f110
-    def __init__(self, state_dim = 45, action_dim=21):
+    def __init__(self, state_dim = 42, action_dim=2):
         super(SACAgent, self).__init__()
 
         self.policy_net = Actor(state_dim=state_dim, action_dim = action_dim).to(device)
@@ -173,6 +172,7 @@ class SACAgent():
         steer = float(torch.tanh(z[0,0]).detach().cpu().numpy())
         throttle = float(torch.tanh(z[0,1]).detach().cpu().numpy())
         
+        #scaled values
         steer = (steer + 1)/2 * (self.steer_range[1] - self.steer_range[0]) + self.steer_range[0]
         throttle = (throttle + 1)/2 * (self.throttle_range[1] - self.throttle_range[0]) + self.throttle_range[0]
         
@@ -247,27 +247,32 @@ class SACAgent():
             self.writer.add_scalar('Loss/policy_loss', pi_loss, global_step=self.num_training)
 
             # mini batch gradient descent
+            print("Updating value net")
             self.value_optimizer.zero_grad()
             V_loss.backward(retain_graph=True)
             nn.utils.clip_grad_norm_(self.value_net.parameters(), 0.5)
             self.value_optimizer.step()
 
+            print("Updating Q1 net")
             self.Q1_optimizer.zero_grad()
             Q1_loss.backward(retain_graph = True)
             nn.utils.clip_grad_norm_(self.Q_net1.parameters(), 0.5)
             self.Q1_optimizer.step()
 
+            print("Updating Q2 net")
             self.Q2_optimizer.zero_grad()
             Q2_loss.backward(retain_graph = True)
             nn.utils.clip_grad_norm_(self.Q_net2.parameters(), 0.5)
             self.Q2_optimizer.step()
 
+            print("Updating policy net")
             self.policy_optimizer.zero_grad()
             pi_loss.backward(retain_graph = True)
             nn.utils.clip_grad_norm_(self.policy_net.parameters(), 0.5)
             self.policy_optimizer.step()
 
             # update target v net update
+            print("Updating target net")
             for target_param, param in zip(self.Target_value_net.parameters(), self.value_net.parameters()):
                 target_param.data.copy_(target_param * (1 - args.tau) + param * args.tau)
 

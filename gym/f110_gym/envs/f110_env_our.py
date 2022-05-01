@@ -231,6 +231,7 @@ class F110Env(gym.Env):
 
 		dist2 = delta_pt[0, :]**2 + temp_y**2
 		closes = dist2 <= 0.1
+		#check for away flag
 		for i in range(self.num_agents):
 			if closes[i] and not self.near_starts[i]:
 				self.near_starts[i] = True
@@ -261,7 +262,7 @@ class F110Env(gym.Env):
 		self.poses_theta = obs_dict['poses_theta']
 		self.collisions = obs_dict['collisions']
 
-	def step(self, action):
+	def step(self, action, render=False):
 		"""
 		Step function for the gym env
 
@@ -279,6 +280,8 @@ class F110Env(gym.Env):
 		obs = self.sim.step(action)
 		obs['lap_times'] = self.lap_times
 		obs['lap_counts'] = self.lap_counts
+		self.vel_x = obs['linear_vels_x'][0]
+		self.vel_y = obs['linear_vels_y'][0]
 
 		F110Env.current_obs = obs
 
@@ -304,8 +307,11 @@ class F110Env(gym.Env):
 		done, toggle_list = self._check_done()
 		info = {'checkpoint_done': toggle_list}
 
-		return obs, reward, done, info
-
+		if render:
+			return obs, reward, done, info
+		else:
+			return state_drift, reward, done, info
+				
 
 	def get_drift_state(self, obs, action):
 		"""
@@ -456,7 +462,7 @@ class F110Env(gym.Env):
 
 		# get no input observations
 		action = np.zeros((self.num_agents, 2))
-		obs, reward, done, info = self.step(action)
+		obs, reward, done, info = self.step(action, render=True)
 
 		self.render_obs = {
 			'ego_idx': obs['ego_idx'],
