@@ -84,6 +84,13 @@ if __name__ == "__main__":
 
 	agent = SACAgent(state_dim=state_dim, action_dim=action_dim)
 
+
+	if args.load: 
+		iter_num = 1050
+		agent.load(epoch= iter_num, capacity= 50000)
+	else:
+		iter_num = 0
+
 	print("====================================")
 	print("Collection Experience...")
 	print("====================================")
@@ -132,7 +139,6 @@ if __name__ == "__main__":
 
 						steer = action[0,0]
 						throttle = action[0,1]
-						print("mapped steer: ", steer, ", throttle: ",throttle)
 						if i%5==0:
 							agent.writer.add_scalar('Control/iteration_'+str(i)+'/steer', steer, global_step = count)
 							agent.writer.add_scalar('Control/iteration_'+str(i)+'/throttle', throttle, global_step = count) 
@@ -186,7 +192,6 @@ if __name__ == "__main__":
 						steer = action[0,0]
 						throttle = action[0,1]
 						print('############### TESTING ##############')
-						print("mapped steer: ", steer, ", throttle: ",throttle)
 						if i%5==0:
 							agent.writer.add_scalar('TEST/Control/iteration_'+str(i)+'/steer', steer, global_step = count)
 							agent.writer.add_scalar('TEST/Control/iteration_'+str(i)+'/throttle', throttle, global_step = count)    
@@ -238,10 +243,10 @@ if __name__ == "__main__":
 		cte = cte/count
 		hae = hae/count
 
-		if i % 10 == 0 and agent.replay_buffer.num_transition > 3000:
-			agent.save(i, args.capacity)
+		if i % 50 == 0 and agent.replay_buffer.num_transition > 3000:
+			agent.save(iter_num, args.capacity)
 		
-		print("Ep_i: %d, the ep_r is: %.2f" % (i, ep_r))
+		# print("Ep_i: %d, the ep_r is: %.2f" % (i, ep_r))
 
 		agent.writer.add_scalar('Metrics/ep_r', ep_r, global_step=i)
 		agent.writer.add_scalar('Metrics/time_cost', time_cost, global_step=i)
@@ -254,7 +259,7 @@ if __name__ == "__main__":
 		# agent.writer.add_scalar('Physics/Mass', env.mass, global_step=i)
 		
 
-		if i % 10 ==0 and agent.replay_buffer.num_transition > 3000:
+		if i % 10 == 0 and agent.replay_buffer.num_transition > 3000:
 			agent.writer.add_scalar('Metrics_test/ep_r', ep_r, global_step=i)
 			agent.writer.add_scalar('Metrics_test/time_cost', time_cost, global_step=i)
 			agent.writer.add_scalar('Metrics_test/avg_speed', speed, global_step=i)
@@ -264,4 +269,7 @@ if __name__ == "__main__":
 
 			# agent.writer.add_scalar('Physics_test/Tire_friction', env.tire_friction, global_step = i)
 			# agent.writer.add_scalar('Physics_test/Mass', env.mass, global_step=i)
+		print("--- %s ---"%iter_num)
+		print(ep_r)
 		ep_r = 0
+		iter_num += 1

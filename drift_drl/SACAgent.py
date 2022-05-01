@@ -38,7 +38,7 @@ parser.add_argument('--batch_size', default=512, type=int) # mini batch size
 # parser.add_argument('--activation', default='Relu', type=str)
 # parser.add_argument('--render', default=False, type=bool) # show UI or not
 # parser.add_argument('--log_interval', default=2000, type=int) #
-# parser.add_argument('--load', default=True, type=bool) # load model
+parser.add_argument('--load', default=True, type=bool) # load model
 
 args = parser.parse_args()
 

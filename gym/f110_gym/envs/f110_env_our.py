@@ -37,7 +37,7 @@ import numpy as np
 import pandas as pd
 import os
 import time
-from numpy import sqrt, cos, sin
+from numpy import sqrt, cos, sin, pi
 
 # gl
 import pyglet
@@ -339,14 +339,14 @@ class F110Env(gym.Env):
 			raise Exception("Atleast one point in reference trajectories doesn't have 5 values")
 		
 		# TODO (Rocket): The paper uses abs. According to us it should be signed for better performance
-		e_y = abs(ref_point[1] - current_y)
+		e_y = ref_point[1] - current_y
 		e_d_y = (self.prev_e_y-e_y) / dt
 		self.prev_e_y = e_y
 
 		# TODO (Rocket): Calc e_heading and e_d_heading
-		# e_heading 
-		e_heading = 0
-		e_d_heading = 0
+		e_heading = self.route[closest_idx, 2] - obs['poses_theta']
+		e_d_heading = (e_heading - self.prev_e_heading) / dt
+		self.prev_e_heading = e_heading
 
 		e_slip = beta - obs['slip_angles']
 		e_d_slip = (e_slip - self.prev_e_slip) / dt
@@ -393,25 +393,25 @@ class F110Env(gym.Env):
 
 
 	def get_reward(self, obs, state_drift):
-		e_dis = state_drift[2]
+		e_dis = abs(state_drift[2])
 		e_slip = state_drift[6]
 		e_heading = state_drift[4]
 
 		r_dis = np.exp(-0.5*e_dis)
 
-		if abs(e_heading)<90:
+		if abs(e_heading)<pi/2:
 			r_heading = np.exp(-0.1*abs(e_heading))
-		elif (e_heading)>= 90:
-			r_heading = -np.exp(-0.1*(180-e_heading))
+		elif (e_heading)>= pi/2:
+			r_heading = -np.exp(-0.1*(pi-e_heading))
 		else:
-			r_heading = -np.exp(-0.1*(e_heading+180))
+			r_heading = -np.exp(-0.1*(e_heading+pi))
 
-		if abs(e_slip)<90:
+		if abs(e_slip)<pi/2:
 			r_slip = np.exp(-0.1*abs(e_slip))
-		elif (e_slip)>= 90:
-			r_slip = -np.exp(-0.1*(180-e_slip))
+		elif (e_slip)>= pi/2:
+			r_slip = -np.exp(-0.1*(pi-e_slip))
 		else:
-			r_slip = -np.exp(-0.1*(e_slip+180))
+			r_slip = -np.exp(-0.1*(e_slip+pi))
 
 		vx = obs['linear_vels_x'][0]
 		vy = obs['linear_vels_y'][0]
@@ -420,7 +420,7 @@ class F110Env(gym.Env):
 		reward = v*(40*r_dis + 40*r_heading + 20*r_slip)
 
 		# TODO (Rocket): The threshold for vel scaling might change for us
-		if v < 6:
+		if v < 3:
 			reward  = reward / 2
 
 		return reward
@@ -511,7 +511,7 @@ class F110Env(gym.Env):
 
 		F110Env.render_callbacks.append(callback_func)
 
-	def render(self, mode='human'):
+	def render(self, mode='human_fast'):
 		"""
 		Renders the environment with pyglet. Use mouse scroll in the window to zoom in/out, use mouse click drag to pan. Shows the agents, the map, current fps (bottom left corner), and the race information near as text.
 
