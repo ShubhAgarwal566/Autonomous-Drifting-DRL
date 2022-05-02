@@ -37,12 +37,6 @@ if __name__ == "__main__":
 
 	args = parser.parse_args()
 
-	#code taken from waypoint_follow.py
-	#tlad is lookahead distance
-
-	work = {'mass': 3.463388126201571, 'lf': 0.15597534362552312, 'tlad': 0.82461887897713965, 'vgain': 0.90338203837889}
-	work['tlad'] =  3.0
-	# work['vgain'] = 0.25
 	with open('config_example_map.yaml') as file:
 		conf_dict = yaml.load(file, Loader=yaml.FullLoader)
 	conf = Namespace(**conf_dict)
@@ -78,26 +72,23 @@ if __name__ == "__main__":
 	state_dim = 42
 	print('action_dimension:', action_dim, ' & state_dimension:', state_dim)
 
-	destinationFlag = False
-	collisionFlag = False
-	f110_startFlag = False
+	done = False
 
 	agent = SACAgent(state_dim=state_dim, action_dim=action_dim)
 
 
 	if args.load: 
-		iter_num = 1050
-		agent.load(epoch= iter_num, capacity= 50000)
+		iter_start = 2500
+		agent.load(epoch= iter_start, capacity= 50000)
 	else:
-		iter_num = 0
+		iter_start = 0
 
 	print("====================================")
 	print("Collection Experience...")
 	print("====================================")
 
-	ep_r = 0###expectation of reward R
-	for i in range(args.iteration):
-		# TODO: change this for f110
+	ep_r = 0 # expectation of reward R
+	for i in range(iter_start, args.iteration):
 		_ = env.reset(np.array([[conf.sx, conf.sy, conf.stheta]]))
 
 		t0 = time.time()
@@ -110,108 +101,55 @@ if __name__ == "__main__":
 		hae = 0 #heading angle error
 		time_cost = 0
 
-		while(True): # one episode
+		#give little throttle at start
+		env.step(np.array([[0,0.5*args.vel_max]]))
+		
+		while(True):
 			count += 1
 			env.render()
 
-			#give little throttle at start
-			if f110_startFlag==False:
-				env.step(np.array([[0,0.5*args.vel_max]]))
-				f110_startFlag = True
-				continue
+			if not first_step_pass:
+				steer = 0.0
+				throttle = 0.0
+			else:
+				action = agent.select_action(tState)
+				# print(action.shape)
+				action = np.reshape(action, [1,2])
+				# print(action.shape)
 
-			# if time.time()-t0 < 0.5: #ignore any collisions that happen in the first 0.5 seconds
-				# env.world.collision_sensor.history = []
+				steer = action[0,0]
+				throttle = action[0,1]
+				if i%5==0:
+					agent.writer.add_scalar('Control/iteration_'+str(i)+'/steer', steer, global_step = count)
+					agent.writer.add_scalar('Control/iteration_'+str(i)+'/throttle', throttle, global_step = count) 
 
-			#except n*10th until 3000 
-			if i % 5 != 0 or agent.replay_buffer.num_transition <= 3000:
-				#reduce the refresh rate of the control loop
-				if time.time()-t0 > 0.5:
-					if not first_step_pass:
-						steer = 0.0
-						throttle = 0.0
-						# hand_brake = False
-					else:
-						action = agent.select_action(tState)
-						# print(action.shape)
-						action = np.reshape(action, [1,2])
-						# print(action.shape)
+			next_state, reward, done, _= env.step(np.array([[steer, throttle*args.vel_max]]))
+			next_state = np.reshape(next_state, [1, state_dim])
+			
+			ep_r += reward
+			
+			if first_step_pass: 
+				action[0,0] = (action[0,0] - agent.steer_range[0]) / (agent.steer_range[1] - agent.steer_range[0]) * 2 - 1
+				action[0,1] = (action[0,1] - agent.throttle_range[0]) / (agent.throttle_range[1] - agent.throttle_range[0]) * 2 - 1
+				agent.replay_buffer.push(tState, action, reward, next_state, done)
+			
+			tState = next_state
+			
+			vx = env.vel_x
+			vy = env.vel_y
+			speed += np.sqrt(vx*vx + vy*vy)
+			# cte = cross track error, check https://medium.com/asap-report/introduction-to-the-carla-simulator-training-a-neural-network-to-control-a-car-part-1-e1c2c9a056a5
+			# Use variable e_y or e_dist
+			cte += tState[0,2]
+			# heading error angle, check notes on tablet. Use variable e_psi
+			hae += abs(tState[0,4])
 
-						steer = action[0,0]
-						throttle = action[0,1]
-						if i%5==0:
-							agent.writer.add_scalar('Control/iteration_'+str(i)+'/steer', steer, global_step = count)
-							agent.writer.add_scalar('Control/iteration_'+str(i)+'/throttle', throttle, global_step = count) 
-
-					# TODO: change this f110
-					next_state, reward, destinationFlag, _= env.step(np.array([[steer, throttle*args.vel_max]]))
-					
-					# next_state, reward, collisionFlag, destinationFlag, awayFlag, control = env.step(steer, throttle)
-					next_state = np.reshape(next_state, [1, state_dim])
-					
-					ep_r += reward
-					
-					if first_step_pass: 
-						
-						action[0,0] = (action[0,0] - agent.steer_range[0]) / (agent.steer_range[1] - agent.steer_range[0]) * 2 - 1
-						action[0,1] = (action[0,1] - agent.throttle_range[0]) / (agent.throttle_range[1] - agent.throttle_range[0]) * 2 - 1
-
-						# TODO: look for changes for f110
-						agent.replay_buffer.push(tState, action, reward, next_state, destinationFlag)
-					
-					tState = next_state
-					
-					vx = env.vel_x
-					vy = env.vel_y
-					speed += np.sqrt(vx*vx + vy*vy)
-					# cte = cross track error, check https://medium.com/asap-report/introduction-to-the-carla-simulator-training-a-neural-network-to-control-a-car-part-1-e1c2c9a056a5
-					# Use variable e_y or e_dist
-					cte += tState[0,2]
-					# heading error angle, check notes on tablet. Use variable e_psi
-					hae += abs(tState[0,4])
-
-					if destinationFlag:
-						break
-					
-					print('buffer_size: %d'%agent.replay_buffer.num_transition)
-					
-					first_step_pass = True 
-			else: #goes here every 10th iteration and every iter after 3000  ## TESTING BLOCK ##
-				#reduce the refresh rate of the control loop
-				if time.time()-t0 > 0.5:
-
-					#TODO (ROCKET): Remove this and test after a succesful run
-					if not first_step_pass:
-						steer = 0.0
-						throttle = 0.0
-						# hand_brake = False
-					else:
-						action = agent.test(tState)
-						action = np.reshape(action, [1,2])
-
-						steer = action[0,0]
-						throttle = action[0,1]
-						print('############### TESTING ##############')
-						if i%5==0:
-							agent.writer.add_scalar('TEST/Control/iteration_'+str(i)+'/steer', steer, global_step = count)
-							agent.writer.add_scalar('TEST/Control/iteration_'+str(i)+'/throttle', throttle, global_step = count)    
-
-					next_state, reward, destinationFlag, _ = env.step(np.array([[steer, throttle*args.vel_max]]))
-					next_state = np.reshape(next_state, [1, state_dim])
-					ep_r += reward
-					
-					tState = next_state
-									
-					vx = env.vel_x
-					vy = env.vel_y
-					speed += np.sqrt(vx*vx + vy*vy)
-					cte += tState[0,2]
-					hae += abs(tState[0,4])
-
-					if destinationFlag:
-						break
-
-					first_step_pass = True 
+			if done:
+				break
+			
+			print('buffer_size: %d'%agent.replay_buffer.num_transition)
+			
+			first_step_pass = True 
 		
 		time_cost = time.time() - t0
 
@@ -238,13 +176,12 @@ if __name__ == "__main__":
 					agent.update()
 			print("***********TRAIN OVER***********")
 
-		
 		speed = speed / count
 		cte = cte/count
 		hae = hae/count
 
 		if i % 50 == 0 and agent.replay_buffer.num_transition > 3000:
-			agent.save(iter_num, args.capacity)
+			agent.save(i, args.capacity)
 		
 		# print("Ep_i: %d, the ep_r is: %.2f" % (i, ep_r))
 
@@ -255,10 +192,6 @@ if __name__ == "__main__":
 		agent.writer.add_scalar('Metrics/avg_heading_error', hae, global_step=i)
 		agent.writer.add_scalar('Metrics/reward_every_second', ep_r/time_cost, global_step=i)
 
-		# agent.writer.add_scalar('Physics/Tire_friction', env.tire_friction, global_step = i)
-		# agent.writer.add_scalar('Physics/Mass', env.mass, global_step=i)
-		
-
 		if i % 10 == 0 and agent.replay_buffer.num_transition > 3000:
 			agent.writer.add_scalar('Metrics_test/ep_r', ep_r, global_step=i)
 			agent.writer.add_scalar('Metrics_test/time_cost', time_cost, global_step=i)
@@ -267,9 +200,6 @@ if __name__ == "__main__":
 			agent.writer.add_scalar('Metrics_test/avg_heading_error', hae, global_step=i)
 			agent.writer.add_scalar('Metrics_test/reward_every_second', ep_r/time_cost, global_step=i)
 
-			# agent.writer.add_scalar('Physics_test/Tire_friction', env.tire_friction, global_step = i)
-			# agent.writer.add_scalar('Physics_test/Mass', env.mass, global_step=i)
-		print("--- %s ---"%iter_num)
+		print("--- %s ---"%i)
 		print(ep_r)
 		ep_r = 0
-		iter_num += 1

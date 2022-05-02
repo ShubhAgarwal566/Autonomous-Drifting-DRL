@@ -11,17 +11,12 @@ from tensorboardX import SummaryWriter
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
-
-#CPU or GPU
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 print(device)
-#device = 'cpu'
-torch.autograd.set_detect_anomaly(True)
 
 parser = argparse.ArgumentParser()
 
 parser.add_argument('--tau',  default=0.005, type=float) # target smoothing coefficient
-# parser.add_argument('--target_update_interval', default=1, type=int)
 parser.add_argument('--gradient_steps', default=1, type=int) # number of updates every timestep
 
 parser.add_argument('--learning_rate', default=3e-4, type=int)
@@ -29,15 +24,6 @@ parser.add_argument('--gamma', default=0.99, type=int) # discount gamma
 parser.add_argument('--capacity', default=400000, type=int) # replay buffer size
 parser.add_argument('--iteration', default=100000, type=int) #  num of episodes
 parser.add_argument('--batch_size', default=512, type=int) # mini batch size
-# parser.add_argument('--seed', default=1, type=int)
-
-# optional parameters
-# parser.add_argument('--num_hidden_layers', default=2, type=int) 
-# parser.add_argument('--num_hidden_units_per_layer', default=256, type=int)
-# parser.add_argument('--sample_frequency', default=256, type=int)
-# parser.add_argument('--activation', default='Relu', type=str)
-# parser.add_argument('--render', default=False, type=bool) # show UI or not
-# parser.add_argument('--log_interval', default=2000, type=int) #
 parser.add_argument('--load', default=True, type=bool) # load model
 
 args = parser.parse_args()
@@ -74,7 +60,7 @@ class Replay_buffer():
         return bn_s, bn_a, bn_r, bn_s_, bn_d
 
 class Actor(nn.Module):
-    def __init__(self, state_dim, action_dim ,min_log_std=-20, max_log_std=2):##max and min left to modify
+    def __init__(self, state_dim, action_dim ,min_log_std=-20, max_log_std=2):
         super(Actor, self).__init__()
         self.fc1 = nn.Linear(state_dim, 512)
         self.fc2 = nn.Linear(512, 256)
@@ -88,12 +74,10 @@ class Actor(nn.Module):
         x = F.relu(self.fc2(x), inplace=False)
         mu = self.mu_head(x)
         log_std_head = self.log_std_head(x)
-        #clamp same as clip
-        log_std = torch.clamp(log_std_head, self.min_log_std, self.max_log_std) ##give a resitriction on the chosen action
+        log_std = torch.clamp(log_std_head, self.min_log_std, self.max_log_std)
         return mu, log_std
 
-    #TODO change names ulta pulta
-class Critic(nn.Module): #Q inputs: s
+class Critic(nn.Module): 
     def __init__(self, state_dim):
         super(Critic, self).__init__()
         self.fc1 = nn.Linear(state_dim, 256)
@@ -127,7 +111,6 @@ class Q(nn.Module): #critic inputs: s,a
 
 
 class SACAgent():
-    #TODO change this according to f110
     def __init__(self, state_dim = 42, action_dim=2):
         super(SACAgent, self).__init__()
 
@@ -151,8 +134,6 @@ class SACAgent():
         self.value_criterion = nn.MSELoss()
         self.Q1_criterion = nn.MSELoss()
         self.Q2_criterion = nn.MSELoss()
-
-        #TODO soft update not implemented correctly
 
         for target_param, param in zip(self.Target_value_net.parameters(), self.value_net.parameters()):
             target_param.data.copy_(param.data)
