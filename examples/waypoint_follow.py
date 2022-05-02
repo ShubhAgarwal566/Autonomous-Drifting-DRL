@@ -278,8 +278,9 @@ def main():
     start = time.time()
 
     while not done:
+        print(obs['poses_theta'][0])
         speed, steer = planner.plan(obs['poses_x'][0], obs['poses_y'][0], obs['poses_theta'][0], work['tlad'], work['vgain'])
-        obs, step_reward, done, info = env.step(np.array([[steer, speed]]), render=False)
+        obs, step_reward, done, info = env.step(np.array([[steer, speed]]), render=True)
         laptime += step_reward
         env.render(mode='human')
         # done = False
