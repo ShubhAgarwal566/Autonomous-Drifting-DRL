@@ -420,7 +420,7 @@ class F110Env(gym.Env):
 		if v < 4:
 			reward  = reward / 2
 
-		return reward*(10**-3)
+		return reward
 
 	def get_closest(self, current_x, current_y):
 		dists = sqrt( (self.route[:,0]-current_x)**2 + (self.route[:,1]-current_y)**2 ) # distance to all points
