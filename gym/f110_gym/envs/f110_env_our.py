@@ -157,8 +157,6 @@ class F110Env(gym.Env):
 		self.poses_y = []
 		self.poses_theta = []
 		self.collisions = np.zeros((self.num_agents, ))
-		# TODO: collision_idx not used yet
-		# self.collision_idx = -1 * np.ones((self.num_agents, ))
 
 		# States to find the errors
 		self.time = time.time()
@@ -215,7 +213,6 @@ class F110Env(gym.Env):
 		"""
 
 		# this is assuming 2 agents
-		# TODO: switch to maybe s-based
 		left_t = 2
 		right_t = 2
 		
@@ -231,7 +228,6 @@ class F110Env(gym.Env):
 
 		dist2 = delta_pt[0, :]**2 + temp_y**2
 		closes = dist2 <= 0.1
-		#check for away flag
 		for i in range(self.num_agents):
 			if closes[i] and not self.near_starts[i]:
 				self.near_starts[i] = True
@@ -332,22 +328,24 @@ class F110Env(gym.Env):
 		current_y = obs['poses_y']
 		closest_idx = self.get_closest(current_x, current_y)
 		ref_point  = self.route[closest_idx].reshape(-1)
-		beta = ref_point[4]
 
 		# self.route (np.array (n,5)): x, y, heading, velocity, beta (slip angle)
 		if (len(ref_point) != 5):
 			raise Exception("Atleast one point in reference trajectories doesn't have 5 values")
 		
-		# TODO (Rocket): The paper uses abs. According to us it should be signed for better performance
 		e_y = ref_point[1] - current_y
 		e_d_y = (self.prev_e_y-e_y) / dt
 		self.prev_e_y = e_y
 
-		# TODO (Rocket): Calc e_heading and e_d_heading
 		e_heading = self.route[closest_idx, 2] - obs['poses_theta']
+		if(e_heading>pi):
+			e_heading -= 2*pi
+		if(e_heading<-pi):
+			e_heading += 2*pi
 		e_d_heading = (e_heading - self.prev_e_heading) / dt
 		self.prev_e_heading = e_heading
 
+		beta = ref_point[4]
 		e_slip = beta - obs['slip_angles']
 		e_d_slip = (e_slip - self.prev_e_slip) / dt
 		self.prev_e_slip = e_slip
@@ -419,11 +417,10 @@ class F110Env(gym.Env):
 
 		reward = v*(40*r_dis + 40*r_heading + 20*r_slip)
 
-		# TODO (Rocket): The threshold for vel scaling might change for us
-		if v < 3:
+		if v < 4:
 			reward  = reward / 2
 
-		return reward
+		return reward*(10**-3)
 
 	def get_closest(self, current_x, current_y):
 		dists = sqrt( (self.route[:,0]-current_x)**2 + (self.route[:,1]-current_y)**2 ) # distance to all points

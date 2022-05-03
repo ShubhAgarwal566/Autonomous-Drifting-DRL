@@ -19,7 +19,7 @@ parser.add_argument('--epoch',  default=2050, type=int)
 parser.add_argument('--vel_max',  default=6.0, type=float)
 args = parser.parse_args()
 
-throttle_range = [0.6, 1.0]
+throttle_range = [0.4, 1.0]
 steer_range = [-0.8, 0.8]
 
 class Actor(nn.Module):

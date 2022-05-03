@@ -7,14 +7,23 @@ perf_num: 6
 map_path: './example_map'
 map_ext: '.png'
 
-# starting pose for map
-sx: 0.0
+
+#      
+
+
+# top left turn on map
+# sx: -33.7921317 
+# sy: 23.6109717
+# stheta: 2.4666706267949
+
+# start of the map
+sx: 0.0 
 sy: 0.0
-stheta: 1.37079632679
+stheta: 1.37
 
 # raceline path and indices
-wpt_path: './example_waypoints.csv'
-wpt_delim: ';'
+wpt_path: 'waypoints_gamma.csv'
+wpt_delim: ','
 wpt_rowskip: 3
 wpt_xind: 1
 wpt_yind: 2

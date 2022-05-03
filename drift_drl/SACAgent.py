@@ -139,8 +139,8 @@ class SACAgent():
             target_param.data.copy_(param.data)
 
 
-        self.steer_range = (-0.8,0.8)
-        self.throttle_range = (0.6,1.0)
+        self.steer_range = (-0.8, 0.8)
+        self.throttle_range = (0.4, 1.0)
 
     def select_action(self, state):
         state = torch.FloatTensor(state).to(device)
