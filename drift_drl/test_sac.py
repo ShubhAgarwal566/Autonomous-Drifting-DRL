@@ -15,7 +15,7 @@ import numpy as np
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--epoch',  default=2050, type=int)
+parser.add_argument('--epoch',  default=3150, type=int)
 parser.add_argument('--vel_max',  default=6.0, type=float)
 args = parser.parse_args()
 

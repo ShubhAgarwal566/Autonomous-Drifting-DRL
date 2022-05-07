@@ -78,7 +78,7 @@ if __name__ == "__main__":
 
 
 	if args.load: 
-		iter_start = 2500
+		iter_start = 3150
 		agent.load(epoch= iter_start, capacity= 50000)
 	else:
 		iter_start = 0

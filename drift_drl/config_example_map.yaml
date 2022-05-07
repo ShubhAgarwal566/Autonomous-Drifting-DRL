@@ -7,12 +7,12 @@ perf_num: 6
 map_path: './example_map'
 map_ext: '.png'
 
-# bottom left turn on map
-# sx: -51.7536321 
-# sy: -3.7800909
-# stheta: -1.3702759732051
+# top left turn on map
+sx: -47.9104052
+sy: 19.4375314
+stheta: 4.97060422107126
 
 # start on the map
-sx: 0.0
-sy: 0.0
-stheta: 1.3702759732051
+# sx: 0.0
+# sy: 0.0
+# stheta: 1.3702759732051
