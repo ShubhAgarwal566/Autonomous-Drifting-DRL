@@ -76,7 +76,7 @@ class EnvRenderer(pyglet.window.Window):
         self.right = width/2
         self.bottom = -height/2
         self.top = height/2
-        self.zoom_level = 1.2
+        self.zoom_level = 3.0
         self.zoomed_width = width
         self.zoomed_height = height
 
@@ -172,10 +172,10 @@ class EnvRenderer(pyglet.window.Window):
 
         # update camera value
         (width, height) = self.get_size()
-        self.left = -self.zoom_level * width/2
-        self.right = self.zoom_level * width/2
-        self.bottom = -self.zoom_level * height/2
-        self.top = self.zoom_level * height/2
+        self.left = -self.zoom_level * (width/2+450)
+        self.right = self.zoom_level * (width/2-450)
+        self.bottom = -self.zoom_level * (height/2-100)
+        self.top = self.zoom_level * (height/2+100)
         self.zoomed_width = self.zoom_level * width
         self.zoomed_height = self.zoom_level * height
 
